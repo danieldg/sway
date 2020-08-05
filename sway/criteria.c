@@ -22,6 +22,7 @@ bool criteria_is_empty(struct criteria *criteria) {
 		&& !criteria->all
 		&& !criteria->app_id
 		&& !criteria->con_mark
+		&& !criteria->trigger
 		&& !criteria->con_id
 #if WLR_HAS_XWAYLAND
 		&& !criteria->class
@@ -105,6 +106,7 @@ void criteria_destroy(struct criteria *criteria) {
 	pattern_destroy(criteria->sandbox_app_id);
 	pattern_destroy(criteria->sandbox_instance_id);
 	free(criteria->target);
+	free(criteria->trigger);
 	free(criteria->cmdlist);
 	free(criteria->raw);
 	free(criteria);
@@ -189,10 +191,14 @@ static bool criteria_matches_container(struct criteria *criteria,
 }
 
 static bool criteria_matches_view(struct criteria *criteria,
-		struct sway_view *view) {
+		struct sway_view *view, const char* trigger) {
 	struct sway_seat *seat = input_manager_current_seat();
 	struct sway_container *focus = seat_get_focused_container(seat);
 	struct sway_view *focused = focus ? focus->view : NULL;
+
+	if (criteria->trigger && trigger && strcmp(criteria->trigger, trigger)) {
+		return false;
+	}
 
 	if (criteria->title) {
 		const char *title = view_get_title(view);
@@ -454,12 +460,12 @@ static bool criteria_matches_view(struct criteria *criteria,
 	return true;
 }
 
-list_t *criteria_for_view(struct sway_view *view, enum criteria_type types) {
+list_t *criteria_for_view(struct sway_view *view, enum criteria_type types, const char* trigger) {
 	list_t *criterias = config->criteria;
 	list_t *matches = create_list();
 	for (int i = 0; i < criterias->length; ++i) {
 		struct criteria *criteria = criterias->items[i];
-		if ((criteria->type & types) && criteria_matches_view(criteria, view)) {
+		if ((criteria->type & types) && criteria_matches_view(criteria, view, trigger)) {
 			list_add(matches, criteria);
 		}
 	}
@@ -469,13 +475,14 @@ list_t *criteria_for_view(struct sway_view *view, enum criteria_type types) {
 struct match_data {
 	struct criteria *criteria;
 	list_t *matches;
+	const char* trigger;
 };
 
 static void criteria_get_containers_iterator(struct sway_container *container,
 		void *data) {
 	struct match_data *match_data = data;
 	if (container->view) {
-		if (criteria_matches_view(match_data->criteria, container->view)) {
+		if (criteria_matches_view(match_data->criteria, container->view, match_data->trigger)) {
 			list_add(match_data->matches, container);
 		}
 	} else if (has_container_criteria(match_data->criteria)) {
@@ -485,11 +492,12 @@ static void criteria_get_containers_iterator(struct sway_container *container,
 	}
 }
 
-list_t *criteria_get_containers(struct criteria *criteria) {
+list_t *criteria_get_containers(struct criteria *criteria, const char* trigger) {
 	list_t *matches = create_list();
 	struct match_data data = {
 		.criteria = criteria,
 		.matches = matches,
+		.trigger = trigger,
 	};
 	root_for_each_container(criteria_get_containers_iterator, &data);
 	return matches;
@@ -544,6 +552,7 @@ enum criteria_token {
 	T_SANDBOX_ENGINE,
 	T_SANDBOX_APP_ID,
 	T_SANDBOX_INSTANCE_ID,
+	T_TRIGGER,
 
 	T_INVALID,
 };
@@ -555,6 +564,8 @@ static enum criteria_token token_from_name(char *name) {
 		return T_APP_ID;
 	} else if (strcmp(name, "con_id") == 0) {
 		return T_CON_ID;
+	} else if (strcmp(name, "trigger") == 0) {
+		return T_TRIGGER;
 	} else if (strcmp(name, "con_mark") == 0) {
 		return T_CON_MARK;
 #if WLR_HAS_XWAYLAND
@@ -638,6 +649,9 @@ static bool parse_token(struct criteria *criteria, char *name, char *value) {
 				error = strdup("The value for 'con_id' should be '__focused__' or numeric");
 			}
 		}
+		break;
+	case T_TRIGGER:
+		criteria->trigger = strdup(value);
 		break;
 	case T_CON_MARK:
 		pattern_create(&criteria->con_mark, value);
