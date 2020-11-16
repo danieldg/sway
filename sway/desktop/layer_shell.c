@@ -485,6 +485,10 @@ static void popup_damage(struct sway_layer_popup *layer_popup, bool whole) {
 		}
 	}
 	struct wlr_output *wlr_output = layer->layer_surface->output;
+	if (!wlr_output) {
+		sway_log(SWAY_DEBUG, "Observed bug 5804");
+		return;
+	}
 	struct sway_output *output = wlr_output->data;
 	output_damage_surface(output, ox, oy, surface, whole);
 }
