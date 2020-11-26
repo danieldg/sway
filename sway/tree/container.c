@@ -535,7 +535,7 @@ void container_calculate_title_height(struct sway_container *container) {
 	int height;
 	int baseline;
 	get_text_size(cairo, config->font, NULL, &height, &baseline, 1,
-			config->pango_markup, "%s", container->formatted_title);
+			config->pango_markup, "%s", "Mqg|`");
 	cairo_destroy(cairo);
 	container->title_height = height;
 	container->title_baseline = baseline;
