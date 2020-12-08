@@ -14,6 +14,7 @@
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
+#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
@@ -71,6 +72,7 @@ bool server_init(struct sway_server *server) {
 	wlr_gamma_control_manager_v1_create(server->wl_display);
 
 	server->new_output.notify = handle_new_output;
+	wlr_gtk_primary_selection_device_manager_create(server->wl_display);
 	wl_signal_add(&server->backend->events.new_output, &server->new_output);
 	server->output_layout_change.notify = handle_output_layout_change;
 	wl_signal_add(&root->output_layout->events.change,
