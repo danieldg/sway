@@ -34,6 +34,7 @@ struct criteria {
 	struct pattern *shell;
 	struct pattern *app_id;
 	struct pattern *con_mark;
+	struct pattern *cli_label;
 	char *trigger; // event that triggered this criteria match
 	uint32_t con_id; // internal ID
 #if HAVE_XWAYLAND

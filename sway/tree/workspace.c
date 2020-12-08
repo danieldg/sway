@@ -498,7 +498,7 @@ bool workspace_is_empty(struct sway_workspace *ws) {
 	// Sticky views are not considered to be part of this workspace
 	for (int i = 0; i < ws->floating->length; ++i) {
 		struct sway_container *floater = ws->floating->items[i];
-		if (!floater->is_sticky) {
+		if (!container_is_sticky(floater)) {
 			return false;
 		}
 	}
@@ -815,5 +815,18 @@ static void count_tiling_views(struct sway_container *con, void *data) {
 size_t workspace_num_tiling_views(struct sway_workspace *ws) {
 	size_t count = 0;
 	workspace_for_each_container(ws, count_tiling_views, &count);
+	return count;
+}
+
+static void count_sticky_containers(struct sway_container *con, void *data) {
+	if (container_is_sticky(con)) {
+		size_t *count = data;
+		*count += 1;
+	}
+}
+
+size_t workspace_num_sticky_containers(struct sway_workspace *ws) {
+	size_t count = 0;
+	workspace_for_each_container(ws, count_sticky_containers, &count);
 	return count;
 }

@@ -660,17 +660,16 @@ static void seat_apply_input_config(struct sway_seat *seat,
 		struct sway_seat_device *sway_device) {
 	struct input_config *ic =
 		input_device_get_config(sway_device->input_device);
-	if (ic == NULL) {
-		return;
-	}
 
 	sway_log(SWAY_DEBUG, "Applying input config to %s",
 		sway_device->input_device->identifier);
 
-	const char *mapped_to_output = ic->mapped_to_output;
-	struct wlr_box *mapped_to_region = ic->mapped_to_region;
+	const char *mapped_to_output = ic == NULL ? NULL : ic->mapped_to_output;
+	struct wlr_box *mapped_to_region = ic == NULL ? NULL : ic->mapped_to_region;
+	enum input_config_mapped_to mapped_to =
+		ic == NULL ? MAPPED_TO_DEFAULT : ic->mapped_to;
 
-	switch (ic->mapped_to) {
+	switch (mapped_to) {
 	case MAPPED_TO_DEFAULT:
 		mapped_to_output = sway_device->input_device->wlr_device->output_name;
 		if (mapped_to_output == NULL) {
@@ -722,6 +721,8 @@ static void seat_configure_pointer(struct sway_seat *seat,
 	wlr_cursor_attach_input_device(seat->cursor->cursor,
 		sway_device->input_device->wlr_device);
 	seat_apply_input_config(seat, sway_device);
+	wl_event_source_timer_update(
+			seat->cursor->hide_source, cursor_get_timeout(seat->cursor));
 }
 
 static void seat_configure_keyboard(struct sway_seat *seat,
@@ -1150,7 +1151,7 @@ void seat_set_focus(struct sway_seat *seat, struct sway_node *node) {
 		for (int i = 0; i < new_output_last_ws->floating->length; ++i) {
 			struct sway_container *floater =
 				new_output_last_ws->floating->items[i];
-			if (floater->is_sticky) {
+			if (container_is_sticky(floater)) {
 				container_detach(floater);
 				workspace_add_floating(new_workspace, floater);
 				--i;
@@ -1423,7 +1424,7 @@ void seat_apply_config(struct sway_seat *seat,
 
 	wl_list_for_each(seat_device, &seat->devices, link) {
 		seat_configure_device(seat, seat_device->input_device);
-		cursor_handle_activity(seat->cursor,
+		cursor_handle_activity_from_device(seat->cursor,
 			seat_device->input_device->wlr_device);
 	}
 }
@@ -1476,13 +1477,9 @@ void seat_consider_warp_to_focus(struct sway_seat *seat) {
 	}
 
 	if (focus->type == N_CONTAINER) {
-		cursor_warp_to_container(seat->cursor, focus->sway_container);
+		cursor_warp_to_container(seat->cursor, focus->sway_container, false);
 	} else {
 		cursor_warp_to_workspace(seat->cursor, focus->sway_workspace);
-	}
-	if (seat->cursor->hidden){
-		cursor_unhide(seat->cursor);
-		wl_event_source_timer_update(seat->cursor->hide_source, cursor_get_timeout(seat->cursor));
 	}
 }
 
@@ -1500,10 +1497,9 @@ void seatop_button(struct sway_seat *seat, uint32_t time_msec,
 	}
 }
 
-void seatop_pointer_motion(struct sway_seat *seat, uint32_t time_msec,
-		double dx, double dy) {
+void seatop_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 	if (seat->seatop_impl->pointer_motion) {
-		seat->seatop_impl->pointer_motion(seat, time_msec, dx, dy);
+		seat->seatop_impl->pointer_motion(seat, time_msec);
 	}
 }
 
@@ -1523,11 +1519,11 @@ void seatop_tablet_tool_tip(struct sway_seat *seat,
 }
 
 void seatop_tablet_tool_motion(struct sway_seat *seat,
-		struct sway_tablet_tool *tool, uint32_t time_msec, double dx, double dy) {
+		struct sway_tablet_tool *tool, uint32_t time_msec) {
 	if (seat->seatop_impl->tablet_tool_motion) {
-		seat->seatop_impl->tablet_tool_motion(seat, tool, time_msec, dx, dy);
+		seat->seatop_impl->tablet_tool_motion(seat, tool, time_msec);
 	} else {
-		seatop_pointer_motion(seat, time_msec, dx, dy);
+		seatop_pointer_motion(seat, time_msec);
 	}
 }
 

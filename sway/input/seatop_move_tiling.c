@@ -5,6 +5,7 @@
 #include "sway/desktop.h"
 #include "sway/input/cursor.h"
 #include "sway/input/seat.h"
+#include "sway/ipc-server.h"
 #include "sway/output.h"
 #include "sway/tree/arrange.h"
 #include "sway/tree/node.h"
@@ -206,8 +207,7 @@ static void handle_motion_postthreshold(struct sway_seat *seat) {
 	desktop_damage_box(&e->drop_box);
 }
 
-static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec,
-		double dx, double dy) {
+static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 	struct seatop_move_tiling_event *e = seat->seatop_data;
 	if (e->threshold_reached) {
 		handle_motion_postthreshold(seat);
@@ -261,6 +261,7 @@ static void finalize_move(struct sway_seat *seat) {
 				container_split(target, new_layout);
 			}
 			container_add_sibling(target, con, after);
+			ipc_event_window(con, "move");
 		}
 	} else {
 		// Target is a workspace which requires splitting

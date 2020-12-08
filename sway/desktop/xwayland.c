@@ -47,6 +47,15 @@ static void unmanaged_handle_commit(struct wl_listener *listener, void *data) {
 		wl_container_of(listener, surface, commit);
 	struct wlr_xwayland_surface *xsurface = surface->wlr_xwayland_surface;
 
+	desktop_damage_surface(xsurface->surface, surface->lx, surface->ly,
+		false);
+}
+
+static void unmanaged_handle_set_geometry(struct wl_listener *listener, void *data) {
+	struct sway_xwayland_unmanaged *surface =
+		wl_container_of(listener, surface, set_geometry);
+	struct wlr_xwayland_surface *xsurface = surface->wlr_xwayland_surface;
+
 	if (xsurface->x != surface->lx || xsurface->y != surface->ly) {
 		// Surface has moved
 		desktop_damage_surface(xsurface->surface, surface->lx, surface->ly,
@@ -55,9 +64,6 @@ static void unmanaged_handle_commit(struct wl_listener *listener, void *data) {
 		surface->ly = xsurface->y;
 		desktop_damage_surface(xsurface->surface, surface->lx, surface->ly,
 			true);
-	} else {
-		desktop_damage_surface(xsurface->surface, xsurface->x, xsurface->y,
-			false);
 	}
 }
 
@@ -67,6 +73,9 @@ static void unmanaged_handle_map(struct wl_listener *listener, void *data) {
 	struct wlr_xwayland_surface *xsurface = surface->wlr_xwayland_surface;
 
 	wl_list_insert(root->xwayland_unmanaged.prev, &surface->link);
+
+	wl_signal_add(&xsurface->events.set_geometry, &surface->set_geometry);
+	surface->set_geometry.notify = unmanaged_handle_set_geometry;
 
 	wl_signal_add(&xsurface->surface->events.commit, &surface->commit);
 	surface->commit.notify = unmanaged_handle_commit;
@@ -89,23 +98,19 @@ static void unmanaged_handle_unmap(struct wl_listener *listener, void *data) {
 	struct wlr_xwayland_surface *xsurface = surface->wlr_xwayland_surface;
 	desktop_damage_surface(xsurface->surface, xsurface->x, xsurface->y, true);
 	wl_list_remove(&surface->link);
+	wl_list_remove(&surface->set_geometry.link);
 	wl_list_remove(&surface->commit.link);
 
 	struct sway_seat *seat = input_manager_current_seat();
-	if (seat->wlr_seat->keyboard_state.focused_surface ==
-			xsurface->surface) {
-
-		// Try to find another unmanaged surface from the same process to pass
-		// focus to. This is necessary because some applications (e.g. Jetbrains
-		// IDEs) represent their multi-level menus as unmanaged surfaces, and
-		// when closing a submenu, the main menu should get input focus.
-		struct sway_xwayland_unmanaged *current;
-		wl_list_for_each(current, &root->xwayland_unmanaged, link) {
-			struct wlr_xwayland_surface *prev_xsurface =
-				current->wlr_xwayland_surface;
-			if (prev_xsurface->pid == xsurface->pid &&
-					wlr_xwayland_or_surface_wants_focus(prev_xsurface)) {
-				seat_set_focus_surface(seat, prev_xsurface->surface, false);
+	if (seat->wlr_seat->keyboard_state.focused_surface == xsurface->surface) {
+		// This simply returns focus to the parent surface if there's one available.
+		// This seems to handle JetBrains issues.
+		if (xsurface->parent && xsurface->parent->surface &&
+				wlr_surface_is_xwayland_surface(xsurface->parent->surface)) {
+			struct wlr_xwayland_surface *next_surface =
+				wlr_xwayland_surface_from_wlr_surface(xsurface->parent->surface);
+			if (wlr_xwayland_or_surface_wants_focus(next_surface)) {
+				seat_set_focus_surface(seat, xsurface->parent->surface, false);
 				return;
 			}
 		}
@@ -123,10 +128,34 @@ static void unmanaged_handle_unmap(struct wl_listener *listener, void *data) {
 static void unmanaged_handle_destroy(struct wl_listener *listener, void *data) {
 	struct sway_xwayland_unmanaged *surface =
 		wl_container_of(listener, surface, destroy);
+	wl_list_remove(&surface->request_configure.link);
 	wl_list_remove(&surface->map.link);
 	wl_list_remove(&surface->unmap.link);
 	wl_list_remove(&surface->destroy.link);
+	wl_list_remove(&surface->override_redirect.link);
 	free(surface);
+}
+
+static void handle_map(struct wl_listener *listener, void *data);
+
+struct sway_xwayland_view *create_xwayland_view(struct wlr_xwayland_surface *xsurface);
+
+static void unmanaged_handle_override_redirect(struct wl_listener *listener, void *data) {
+	struct sway_xwayland_unmanaged *surface =
+		wl_container_of(listener, surface, override_redirect);
+	struct wlr_xwayland_surface *xsurface = surface->wlr_xwayland_surface;
+
+	bool mapped = xsurface->mapped;
+	if (mapped) {
+		unmanaged_handle_unmap(&surface->unmap, NULL);
+	}
+
+	unmanaged_handle_destroy(&surface->destroy, NULL);
+	xsurface->data = NULL;
+	struct sway_xwayland_view *xwayland_view = create_xwayland_view(xsurface);
+	if (mapped) {
+		handle_map(&xwayland_view->map, xsurface);
+	}
 }
 
 static struct sway_xwayland_unmanaged *create_unmanaged(
@@ -149,10 +178,11 @@ static struct sway_xwayland_unmanaged *create_unmanaged(
 	surface->unmap.notify = unmanaged_handle_unmap;
 	wl_signal_add(&xsurface->events.destroy, &surface->destroy);
 	surface->destroy.notify = unmanaged_handle_destroy;
+	wl_signal_add(&xsurface->events.set_override_redirect, &surface->override_redirect);
+	surface->override_redirect.notify = unmanaged_handle_override_redirect;
 
 	return surface;
 }
-
 
 static struct sway_xwayland_view *xwayland_view_from_view(
 		struct sway_view *view) {
@@ -371,8 +401,8 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 
 	if (view->container->node.instruction) {
 		get_geometry(view, &view->geometry);
-		transaction_notify_view_ready_by_size(view,
-				state->width, state->height);
+		transaction_notify_view_ready_by_geometry(view,
+				xsurface->x, xsurface->y, state->width, state->height);
 	} else {
 		struct wlr_box new_geo;
 		get_geometry(view, &new_geo);
@@ -388,8 +418,8 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 			memcpy(&view->geometry, &new_geo, sizeof(struct wlr_box));
 			desktop_damage_view(view);
 			transaction_commit_dirty();
-			transaction_notify_view_ready_by_size(view,
-					new_geo.width, new_geo.height);
+			transaction_notify_view_ready_by_geometry(view,
+					xsurface->x, xsurface->y, new_geo.width, new_geo.height);
 		} else {
 			memcpy(&view->geometry, &new_geo, sizeof(struct wlr_box));
 		}
@@ -423,6 +453,7 @@ static void handle_destroy(struct wl_listener *listener, void *data) {
 	wl_list_remove(&xwayland_view->set_decorations.link);
 	wl_list_remove(&xwayland_view->map.link);
 	wl_list_remove(&xwayland_view->unmap.link);
+	wl_list_remove(&xwayland_view->override_redirect.link);
 	view_begin_destroy(&xwayland_view->view);
 }
 
@@ -446,16 +477,6 @@ static void handle_map(struct wl_listener *listener, void *data) {
 	struct wlr_xwayland_surface *xsurface = data;
 	struct sway_view *view = &xwayland_view->view;
 
-	if (xsurface->override_redirect) {
-		// This window used not to have the override redirect flag and has it
-		// now. Switch to unmanaged.
-		handle_destroy(&xwayland_view->destroy, view);
-		xsurface->data = NULL;
-		struct sway_xwayland_unmanaged *unmanaged = create_unmanaged(xsurface);
-		unmanaged_handle_map(&unmanaged->map, xsurface);
-		return;
-	}
-
 	view->natural_width = xsurface->width;
 	view->natural_height = xsurface->height;
 
@@ -468,6 +489,25 @@ static void handle_map(struct wl_listener *listener, void *data) {
 	view_map(view, xsurface->surface, xsurface->fullscreen, NULL, false);
 
 	transaction_commit_dirty();
+}
+
+static void handle_override_redirect(struct wl_listener *listener, void *data) {
+	struct sway_xwayland_view *xwayland_view =
+		wl_container_of(listener, xwayland_view, override_redirect);
+	struct wlr_xwayland_surface *xsurface = data;
+	struct sway_view *view = &xwayland_view->view;
+
+	bool mapped = xsurface->mapped;
+	if (mapped) {
+		handle_unmap(&xwayland_view->unmap, NULL);
+	}
+
+	handle_destroy(&xwayland_view->destroy, view);
+	xsurface->data = NULL;
+	struct sway_xwayland_unmanaged *unmanaged = create_unmanaged(xsurface);
+	if (mapped) {
+		unmanaged_handle_map(&unmanaged->map, xsurface);
+	}
 }
 
 static void handle_request_configure(struct wl_listener *listener, void *data) {
@@ -642,22 +682,14 @@ struct sway_view *view_from_wlr_xwayland_surface(
 	return xsurface->data;
 }
 
-void handle_xwayland_surface(struct wl_listener *listener, void *data) {
-	struct wlr_xwayland_surface *xsurface = data;
-
-	if (xsurface->override_redirect) {
-		sway_log(SWAY_DEBUG, "New xwayland unmanaged surface");
-		create_unmanaged(xsurface);
-		return;
-	}
-
+struct sway_xwayland_view *create_xwayland_view(struct wlr_xwayland_surface *xsurface) {
 	sway_log(SWAY_DEBUG, "New xwayland surface title='%s' class='%s'",
 		xsurface->title, xsurface->class);
 
 	struct sway_xwayland_view *xwayland_view =
 		calloc(1, sizeof(struct sway_xwayland_view));
 	if (!sway_assert(xwayland_view, "Failed to allocate view")) {
-		return;
+		return NULL;
 	}
 
 	view_init(&xwayland_view->view, SWAY_VIEW_XWAYLAND, &view_impl);
@@ -716,7 +748,25 @@ void handle_xwayland_surface(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xsurface->events.map, &xwayland_view->map);
 	xwayland_view->map.notify = handle_map;
 
+	wl_signal_add(&xsurface->events.set_override_redirect,
+			&xwayland_view->override_redirect);
+	xwayland_view->override_redirect.notify = handle_override_redirect;
+
 	xsurface->data = xwayland_view;
+
+	return xwayland_view;
+}
+
+void handle_xwayland_surface(struct wl_listener *listener, void *data) {
+	struct wlr_xwayland_surface *xsurface = data;
+
+	if (xsurface->override_redirect) {
+		sway_log(SWAY_DEBUG, "New xwayland unmanaged surface");
+		create_unmanaged(xsurface);
+		return;
+	}
+
+	create_xwayland_view(xsurface);
 }
 
 void handle_xwayland_ready(struct wl_listener *listener, void *data) {

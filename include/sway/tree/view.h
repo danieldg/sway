@@ -162,6 +162,7 @@ struct sway_xwayland_view {
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener destroy;
+	struct wl_listener override_redirect;
 };
 
 struct sway_xwayland_unmanaged {
@@ -173,9 +174,11 @@ struct sway_xwayland_unmanaged {
 	struct wl_listener request_configure;
 	struct wl_listener request_fullscreen;
 	struct wl_listener commit;
+	struct wl_listener set_geometry;
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener destroy;
+	struct wl_listener override_redirect;
 };
 #endif
 struct sway_view_child;
@@ -228,6 +231,8 @@ const char *view_get_app_id(struct sway_view *view);
 const char *view_get_class(struct sway_view *view);
 
 const char *view_get_instance(struct sway_view *view);
+
+const char *view_get_conn_label(struct sway_view *view);
 
 uint32_t view_get_x11_window_id(struct sway_view *view);
 

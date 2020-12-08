@@ -6,6 +6,7 @@
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/edges.h>
 #include "log.h"
+#include "sway/client_label.h"
 #include "sway/decoration.h"
 #include "sway/desktop.h"
 #include "sway/desktop/transaction.h"
@@ -284,29 +285,27 @@ static void handle_commit(struct wl_listener *listener, void *data) {
 	struct sway_view *view = &xdg_shell_view->view;
 	struct wlr_xdg_surface *xdg_surface = view->wlr_xdg_surface;
 
+	struct wlr_box new_geo;
+	wlr_xdg_surface_get_geometry(xdg_surface, &new_geo);
+	bool new_size = new_geo.width != view->geometry.width ||
+			new_geo.height != view->geometry.height ||
+			new_geo.x != view->geometry.x ||
+			new_geo.y != view->geometry.y;
+
+	if (new_size) {
+		// The view has unexpectedly sent a new size
+		desktop_damage_view(view);
+		view_update_size(view, new_geo.width, new_geo.height);
+		memcpy(&view->geometry, &new_geo, sizeof(struct wlr_box));
+		desktop_damage_view(view);
+		transaction_commit_dirty();
+	}
+
 	if (view->container->node.instruction) {
-		wlr_xdg_surface_get_geometry(xdg_surface, &view->geometry);
 		transaction_notify_view_ready_by_serial(view,
 				xdg_surface->configure_serial);
-	} else {
-		struct wlr_box new_geo;
-		wlr_xdg_surface_get_geometry(xdg_surface, &new_geo);
-
-		if ((new_geo.width != view->geometry.width ||
-					new_geo.height != view->geometry.height ||
-					new_geo.x != view->geometry.x ||
-					new_geo.y != view->geometry.y)) {
-			// The view has unexpectedly sent a new size
-			desktop_damage_view(view);
-			view_update_size(view, new_geo.width, new_geo.height);
-			memcpy(&view->geometry, &new_geo, sizeof(struct wlr_box));
-			desktop_damage_view(view);
-			transaction_commit_dirty();
-			transaction_notify_view_ready_by_size(view,
-					new_geo.width, new_geo.height);
-		} else {
-			memcpy(&view->geometry, &new_geo, sizeof(struct wlr_box));
-		}
+	} else if (new_size) {
+		transaction_notify_view_ready_immediately(view);
 	}
 
 	view_damage_from(view);
@@ -539,4 +538,48 @@ void handle_xdg_shell_surface(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_surface->events.destroy, &xdg_shell_view->destroy);
 
 	xdg_surface->data = xdg_shell_view;
+}
+
+struct wl_client_label {
+	struct wl_listener listener;
+	char* label;
+};
+
+static void wl_client_label_notify_fn(struct wl_listener *listener, void *data) {
+	// struct wl_client *client = data;
+	struct wl_client_label *label = wl_container_of(listener, label, listener);
+	free(label->label);
+	free(label);
+}
+
+char *wl_client_label_get(struct wl_client *client) {
+	struct wl_listener *label_l =
+		wl_client_get_destroy_listener(client, wl_client_label_notify_fn);
+	if (!label_l) {
+		return NULL;
+	}
+	struct wl_client_label *label_s = wl_container_of(label_l, label_s, listener);
+	return label_s->label;
+}
+
+void wl_client_label_set(struct wl_client *client, char* label) {
+	struct wl_listener *label_l =
+		wl_client_get_destroy_listener(client, wl_client_label_notify_fn);
+	struct wl_client_label *label_s;
+	if (label_l) {
+		label_s = wl_container_of(label_l, label_s, listener);
+		free(label_s->label);
+	} else if (label == NULL) {
+		return;
+	} else {
+		label_s = calloc(1, sizeof(*label_s));
+		if (label_s == NULL) {
+			sway_log(SWAY_ERROR, "Allocation failed");
+			free(label);
+			return;
+		}
+		label_s->listener.notify = wl_client_label_notify_fn;
+		wl_client_add_destroy_listener(client, &label_s->listener);
+	}
+	label_s->label = label;
 }

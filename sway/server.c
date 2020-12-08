@@ -1,7 +1,8 @@
-#define _POSIX_C_SOURCE 200112L
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
 #include <wlr/backend/headless.h>
@@ -13,7 +14,6 @@
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
 #include <wlr/types/wlr_gamma_control_v1.h>
-#include <wlr/types/wlr_gtk_primary_selection.h>
 #include <wlr/types/wlr_idle.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_pointer_constraints_v1.h>
@@ -69,7 +69,6 @@ bool server_init(struct sway_server *server) {
 		wlr_data_device_manager_create(server->wl_display);
 
 	wlr_gamma_control_manager_v1_create(server->wl_display);
-	wlr_gtk_primary_selection_device_manager_create(server->wl_display);
 
 	server->new_output.notify = handle_new_output;
 	wl_signal_add(&server->backend->events.new_output, &server->new_output);
@@ -151,7 +150,16 @@ bool server_init(struct sway_server *server) {
 	wlr_primary_selection_v1_device_manager_create(server->wl_display);
 	wlr_viewporter_create(server->wl_display);
 
-	server->socket = wl_display_add_socket_auto(server->wl_display);
+	// Avoid using "wayland-0" as display socket
+	char name_candidate[16];
+	for (int i = 1; i <= 32; ++i) {
+		sprintf(name_candidate, "wayland-%d", i);
+		if (wl_display_add_socket(server->wl_display, name_candidate) >= 0) {
+			server->socket = strdup(name_candidate);
+			break;
+		}
+	}
+
 	if (!server->socket) {
 		sway_log(SWAY_ERROR, "Unable to open wayland socket");
 		wlr_backend_destroy(server->backend);
@@ -165,7 +173,12 @@ bool server_init(struct sway_server *server) {
 
 	server->headless_backend =
 		wlr_headless_backend_create_with_renderer(server->wl_display, renderer);
-	wlr_multi_backend_add(server->backend, server->headless_backend);
+	if (!server->headless_backend) {
+		sway_log(SWAY_INFO, "Failed to create secondary headless backend, "
+			"starting without it");
+	} else {
+		wlr_multi_backend_add(server->backend, server->headless_backend);
+	}
 
 	// This may have been set already via -Dtxn-timeout
 	if (!server->txn_timeout_ms) {

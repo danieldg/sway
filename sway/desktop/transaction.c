@@ -358,11 +358,20 @@ static void transaction_progress_queue(void) {
 	// If there's a bunch of consecutive transactions which all apply to the
 	// same views, skip all except the last one.
 	while (server.transactions->length >= 2) {
-		struct sway_transaction *a = server.transactions->items[0];
-		struct sway_transaction *b = server.transactions->items[1];
-		if (transaction_same_nodes(a, b)) {
+		struct sway_transaction *txn = server.transactions->items[0];
+		struct sway_transaction *dup = NULL;
+
+		for (int i = 1; i < server.transactions->length; i++) {
+			struct sway_transaction *maybe_dup = server.transactions->items[i];
+			if (transaction_same_nodes(txn, maybe_dup)) {
+				dup = maybe_dup;
+				break;
+			}
+		}
+
+		if (dup) {
 			list_del(server.transactions, 0);
-			transaction_destroy(a);
+			transaction_destroy(txn);
 		} else {
 			break;
 		}
@@ -397,8 +406,12 @@ static bool should_configure(struct sway_node *node,
 	// Xwayland views are position-aware and need to be reconfigured
 	// when their position changes.
 	if (node->sway_container->view->type == SWAY_VIEW_XWAYLAND) {
-		if (cstate->content_x != istate->content_x ||
-				cstate->content_y != istate->content_y) {
+		// Sway logical coordinates are doubles, but they get truncated to
+		// integers when sent to Xwayland through `xcb_configure_window`.
+		// X11 apps will not respond to duplicate configure requests (from their
+		// truncated point of view) and cause transactions to time out.
+		if ((int)cstate->content_x != (int)istate->content_x ||
+				(int)cstate->content_y != (int)istate->content_y) {
 			return true;
 		}
 	}
@@ -506,13 +519,23 @@ void transaction_notify_view_ready_by_serial(struct sway_view *view,
 	}
 }
 
-void transaction_notify_view_ready_by_size(struct sway_view *view,
-		int width, int height) {
+void transaction_notify_view_ready_by_geometry(struct sway_view *view,
+		double x, double y, int width, int height) {
 	struct sway_transaction_instruction *instruction =
 		view->container->node.instruction;
 	if (instruction != NULL &&
+			(int)instruction->container_state.content_x == (int)x &&
+			(int)instruction->container_state.content_y == (int)y &&
 			instruction->container_state.content_width == width &&
 			instruction->container_state.content_height == height) {
+		set_instruction_ready(instruction);
+	}
+}
+
+void transaction_notify_view_ready_immediately(struct sway_view *view) {
+	struct sway_transaction_instruction *instruction =
+			view->container->node.instruction;
+	if (instruction != NULL) {
 		set_instruction_ready(instruction);
 	}
 }

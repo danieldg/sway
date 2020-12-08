@@ -7,7 +7,9 @@
 #include "sway/input/cursor.h"
 #include "sway/input/seat.h"
 #include "sway/input/tablet.h"
+#include "sway/output.h"
 #include "sway/tree/view.h"
+#include "sway/tree/workspace.h"
 #include "log.h"
 #if HAVE_XWAYLAND
 #include "sway/xwayland.h"
@@ -69,6 +71,9 @@ static enum wlr_edges find_edge(struct sway_container *cont,
 	}
 	if (cont->border == B_NONE || !cont->border_thickness ||
 			cont->border == B_CSD) {
+		return WLR_EDGE_NONE;
+	}
+	if (cont->fullscreen_mode) {
 		return WLR_EDGE_NONE;
 	}
 
@@ -513,6 +518,22 @@ static void check_focus_follows_mouse(struct sway_seat *seat,
 		struct seatop_default_event *e, struct sway_node *hovered_node) {
 	struct sway_node *focus = seat_get_focus(seat);
 
+	// This is the case if a layer-shell surface is hovered.
+	// If it's on another output, focus the active workspace there.
+	if (!hovered_node) {
+		struct wlr_output *wlr_output = wlr_output_layout_output_at(
+				root->output_layout, seat->cursor->cursor->x, seat->cursor->cursor->y);
+		if (wlr_output == NULL) {
+			return;
+		}
+		struct sway_output *hovered_output = wlr_output->data;
+		if (focus && hovered_output != node_get_output(focus)) {
+			struct sway_workspace *ws = output_get_active_workspace(hovered_output);
+			seat_set_focus(seat, &ws->node);
+		}
+		return;
+	}
+
 	// If a workspace node is hovered (eg. in the gap area), only set focus if
 	// the workspace is on a different output to the previous focus.
 	if (focus && hovered_node->type == N_WORKSPACE) {
@@ -539,8 +560,7 @@ static void check_focus_follows_mouse(struct sway_seat *seat,
 	}
 }
 
-static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec,
-		double dx, double dy) {
+static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec) {
 	struct seatop_default_event *e = seat->seatop_data;
 	struct sway_cursor *cursor = seat->cursor;
 
@@ -549,7 +569,7 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec,
 	struct sway_node *node = node_at_coords(seat,
 			cursor->cursor->x, cursor->cursor->y, &surface, &sx, &sy);
 
-	if (node && config->focus_follows_mouse != FOLLOWS_NO) {
+	if (config->focus_follows_mouse != FOLLOWS_NO) {
 		check_focus_follows_mouse(seat, e, node);
 	}
 
@@ -574,7 +594,7 @@ static void handle_pointer_motion(struct sway_seat *seat, uint32_t time_msec,
 }
 
 static void handle_tablet_tool_motion(struct sway_seat *seat,
-		struct sway_tablet_tool *tool, uint32_t time_msec, double dx, double dy) {
+		struct sway_tablet_tool *tool, uint32_t time_msec) {
 	struct seatop_default_event *e = seat->seatop_data;
 	struct sway_cursor *cursor = seat->cursor;
 
@@ -583,7 +603,7 @@ static void handle_tablet_tool_motion(struct sway_seat *seat,
 	struct sway_node *node = node_at_coords(seat,
 			cursor->cursor->x, cursor->cursor->y, &surface, &sx, &sy);
 
-	if (node && config->focus_follows_mouse != FOLLOWS_NO) {
+	if (config->focus_follows_mouse != FOLLOWS_NO) {
 		check_focus_follows_mouse(seat, e, node);
 	}
 
@@ -686,19 +706,14 @@ static void handle_pointer_axis(struct sway_seat *seat,
 			} else if (desired >= siblings->length) {
 				desired = siblings->length - 1;
 			}
-			struct sway_node *old_focus = seat_get_focus(seat);
+
 			struct sway_container *new_sibling_con = siblings->items[desired];
 			struct sway_node *new_sibling = &new_sibling_con->node;
 			struct sway_node *new_focus =
 				seat_get_focus_inactive(seat, new_sibling);
-			if (node_has_ancestor(old_focus, tabcontainer)) {
-				seat_set_focus(seat, new_focus);
-			} else {
-				// Scrolling when focus is not in the tabbed container at all
-				seat_set_raw_focus(seat, new_sibling);
-				seat_set_raw_focus(seat, new_focus);
-				seat_set_raw_focus(seat, old_focus);
-			}
+			// Use the focused child of the tabbed/stacked container, not the
+			// container the user scrolled on.
+			seat_set_focus(seat, new_focus);
 			handled = true;
 		}
 	}

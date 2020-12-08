@@ -13,6 +13,7 @@
 #endif
 #include "list.h"
 #include "log.h"
+#include "sway/client_label.h"
 #include "sway/criteria.h"
 #include "sway/commands.h"
 #include "sway/desktop.h"
@@ -105,6 +106,21 @@ const char *view_get_class(struct sway_view *view) {
 const char *view_get_instance(struct sway_view *view) {
 	if (view->impl->get_string_prop) {
 		return view->impl->get_string_prop(view, VIEW_PROP_INSTANCE);
+	}
+	return NULL;
+}
+
+const char *view_get_conn_label(struct sway_view *view) {
+	switch (view->type) {
+	case SWAY_VIEW_XDG_SHELL:;
+		struct wl_client *client =
+			wl_resource_get_client(view->surface->resource);
+		return wl_client_label_get(client);
+#if HAVE_XWAYLAND
+	case SWAY_VIEW_XWAYLAND:;
+		// Is this concept useful in xwayland?
+		break;
+#endif
 	}
 	return NULL;
 }
@@ -280,7 +296,8 @@ void view_autoconfigure(struct sway_view *view) {
 			(config->hide_edge_borders_smart == ESMART_NO_GAPS &&
 			!gaps_to_edge(view));
 		if (smart) {
-			bool show_border = !view_is_only_visible(view);
+			bool show_border = container_is_floating_or_child(con) ||
+				!view_is_only_visible(view);
 			con->border_left &= show_border;
 			con->border_right &= show_border;
 			con->border_top &= show_border;
@@ -1243,13 +1260,9 @@ bool view_is_visible(struct sway_view *view) {
 			return false;
 		}
 	}
-	// Determine if view is nested inside a floating container which is sticky
-	struct sway_container *floater = view->container;
-	while (floater->parent) {
-		floater = floater->parent;
-	}
-	bool is_sticky = container_is_floating(floater) && floater->is_sticky;
-	if (!is_sticky && workspace && !workspace_is_visible(workspace)) {
+
+	if (!container_is_sticky_or_child(view->container) && workspace &&
+			!workspace_is_visible(workspace)) {
 		return false;
 	}
 	// Check view isn't in a tabbed or stacked container on an inactive tab
