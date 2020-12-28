@@ -362,7 +362,7 @@ static void handle_request_fullscreen(struct wl_listener *listener, void *data) 
 		}
 	}
 
-	container_set_fullscreen(container, e->fullscreen);
+	container_request_fullscreen(container, e->fullscreen);
 
 	arrange_root();
 	transaction_commit_dirty();
