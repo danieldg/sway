@@ -80,7 +80,9 @@ static struct cmd_handler handlers[] = {
 	{ "no_focus", cmd_no_focus },
 	{ "output", cmd_output },
 	{ "popup_during_fullscreen", cmd_popup_during_fullscreen },
+	{ "sandbox_socket", cmd_sandbox_socket },
 	{ "seat", cmd_seat },
+	{ "security_label", cmd_security_label },
 	{ "set", cmd_set },
 	{ "show_marks", cmd_show_marks },
 	{ "smart_borders", cmd_smart_borders },
@@ -114,6 +116,7 @@ static struct cmd_handler command_handlers[] = {
 	{ "exit", cmd_exit },
 	{ "floating", cmd_floating },
 	{ "fullscreen", cmd_fullscreen },
+	{ "inhibit_fullscreen", cmd_inhibit_fullscreen },
 	{ "inhibit_idle", cmd_inhibit_idle },
 	{ "kill", cmd_kill },
 	{ "layout", cmd_layout },
@@ -236,7 +239,7 @@ list_t *execute_command(char *_exec, struct sway_seat *seat,
 					goto cleanup;
 				}
 				list_free(containers);
-				containers = criteria_get_containers(criteria);
+				containers = criteria_get_containers(criteria, "command");
 				head += strlen(criteria->raw);
 				criteria_destroy(criteria);
 				config->handler_context.using_criteria = true;

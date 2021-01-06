@@ -161,6 +161,12 @@ set|plus|minus <amount>
 	_right_, _bottom_, and _left_ or per direction with _horizontal_ and
 	_vertical_.
 
+*inhibit_fullscreen* toggle|enable|disable
+	Set/unset fullscreen inhibitor for for the container. If enabled, client
+	requests to fullscreen the container will be ignored. This can be used to
+	have clients transition to their fullscreen interface, while still
+	constraining them to their container.
+
 *inhibit_idle* focus|fullscreen|open|none|visible
 	Set/unset an idle inhibitor for the view. _focus_ will inhibit idle when
 	the view is focused by any seat. _fullscreen_ will inhibit idle when the
@@ -319,8 +325,10 @@ set|plus|minus <amount>
 	established by the *seat* subcommand of the same name. See
 	*sway-input*(5) for more ways to affect inhibitors.
 
-*split* vertical|v|horizontal|h|toggle|t
-	Splits the current container, vertically or horizontally. When _toggle_ is
+*split* vertical|v|horizontal|h|none|n|toggle|t
+	Splits the current container, vertically or horizontally. When _none_ is
+	specified, the effect of a previous split is undone if the current
+	container is the only child of a split parent. When _toggle_ is
 	specified, the current container is split opposite to the parent
 	container's layout.
 
