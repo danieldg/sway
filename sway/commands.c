@@ -73,7 +73,6 @@ static const struct cmd_handler handlers[] = {
 	{ "gaps", cmd_gaps },
 	{ "hide_edge_borders", cmd_hide_edge_borders },
 	{ "input", cmd_input },
-	{ "lock_screen", cmd_lock_screen},
 	{ "mode", cmd_mode },
 	{ "mouse_warping", cmd_mouse_warping },
 	{ "new_float", cmd_new_float },

@@ -11,7 +11,6 @@ struct sway_lock_state {
 	// if this is not NULL, screen is locked. If the lock screen crashed,
 	// this may be set to PERMALOCK_CLIENT .
 	struct wl_client *client;
-	struct wl_listener client_destroy;
 
 	struct wlr_texture *permalock_message;
 	struct wl_global *ext_unlocker_v1_global;
@@ -20,7 +19,6 @@ struct sway_lock_state {
 // todo: need destroy
 void sway_lock_state_create(struct sway_lock_state *state,
 		struct wl_display *display);
-struct cmd_results *run_lockscreen_cmd(const char *cmd, bool fail_locked);
 
 struct sway_output;
 /** Create a texture which briefly explains the permalock state. */
