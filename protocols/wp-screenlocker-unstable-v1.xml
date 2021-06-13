@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="zwp_screenlocker_v1">
+  <interface name="zwp_screenlocker_v1" version="1">
+    <description summary="Screen locking manager">
+      This interface provides notification of screen lock/unlock events and
+      (if supported) acting as a screenlocker.
+
+      This is a privileged protocol; clients do not need access to this
+      protocol if they only want to display windows on the locked desktop.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy this object"/>
+    </request>
+
+    <event name="locked">
+      <description summary="Triggered when the screen is locked">
+        This event will be sent on creation if the screen is currently locked.
+
+        Windows on the unlocked desktop may still be visible due to a locking
+        animation. Frame callbacks should be used to identify when specific
+        surfaces are no longer visible.
+      </description>
+    </event>
+
+    <event name="unlocked">
+      <description summary="Triggered when the screen is unlocked">
+        Windows on the locked desktop may still be visible due to a locking
+        animation. Frame callbacks should be used to identify when specific
+        surfaces are no longer visible.
+      </description>
+    </event>
+
+    <event name="lock_abandoned">
+      <description summary="Triggered when a locker dies without unlocking">
+        A new screen-locker should be started as soon as possible in order to
+        allow the user to unlock the session.
+      </description>
+    </event>
+
+    <request name="lock">
+      <description summary="Request that this client become the screen locker">
+        Requesting a new lock handle will succeed if this client has permission
+        to lock the screen and either the screen is not currently locked or the
+        original locker of the screen is no longer present. If the screen was
+        not previously locked, the lock will be created as a temporary lock; see
+        zwp_screenlocker_lock_v1.set_persistent to change this. If a persistent
+        lock was abandoned, the lock will start out persistent.
+      </description>
+      <arg name="id" type="new_id" interface="zwp_screenlocker_lock_v1"/>
+    </request>
+  </interface>
+
+  <interface name="zwp_screenlocker_lock_v1" version="1">
+    <event name="rejected">
+      <description summary="The compositor has rejected the request">
+        This object is inert and should be destroyed.  
+
+        TODO: should the reason be an enum?  Possible values: permission_denied, locker_exists.
+      </description>
+      <arg name="reason" type="string" allow-null="true" summary="reason for the rejection"/>
+    </event>
+
+    <event name="locked">
+      <description summary="The lock request was accepted and the screen is locked">
+        The lock handle is active and only the locked desktop is visible on all
+        outputs. If a compositor implements a locking animation or similar
+        effect that results in both the locked and unlocked desktops being
+        visible, this event is sent after the effect completes.
+      </description>
+    </event>
+
+    <request name="set_persistent">
+      <description summary="request that the lock persist if this client dies">
+        This avoids the screen unlocking if the client is killed or otherwise
+        disconnects without calling either set_temporary or unlock. It is valid
+        to call this on a newly created lock handle without waiting for an
+        event.
+
+        This may be called immediately on creation of the lock handle or at any
+        point prior to calling unlock. For example, a lock triggered due to idle
+        may delay enabling persistance for a brief period after triggering the
+        lock where an immediate resumption of user activity does not require
+        authentication.
+      </description>
+    </request>
+
+    <request name="set_temporary">
+      <description summary="request that the lock not persist if this client dies">
+        This is intended for lockers that do not require authenticating or which
+        do not want to risk leaving the session in a locked state if the locking
+        process disconnects.
+      </description>
+    </request>
+
+    <request name="unlock">
+      <description summary="unlock screen">
+        Let the compositor know that it should unlock the screen.
+
+        It is valid to call this on a newly created lock handle without waiting
+        for an event; this will either cancel the lock or do nothing if the lock
+        handle is inert.
+
+        After this request has been sent by the client, this object will become
+        inert and should be destroyed.
+      </description>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy this object">
+        Destroying an active lock handle without first unlocking it will abandon
+        the lock, resulting in either a wp_screenlocker.lock_abandoned event or
+        an immediate unlock depending on if the lock is persistent.
+      </description>
+    </request>
+  </interface>
+</protocol>

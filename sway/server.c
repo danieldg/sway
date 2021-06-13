@@ -38,7 +38,6 @@
 #include "sway/desktop/idle_inhibit_v1.h"
 #include "sway/input/input-manager.h"
 #include "sway/output.h"
-#include "sway/security.h"
 #include "sway/server.h"
 #include "sway/tree/root.h"
 #if HAVE_XWAYLAND
@@ -169,8 +168,6 @@ bool server_init(struct sway_server *server) {
 		&server->xdg_activation_v1_request_activate);
 
 	sway_lock_state_create(&server->lock_screen, server->wl_display);
-
-	wl_display_set_global_filter(server->wl_display, security_global_filter, server);
 
 	// Avoid using "wayland-0" as display socket
 	char name_candidate[16];
