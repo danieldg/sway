@@ -16,7 +16,18 @@
 #include "sway/server.h"
 #include "util.h"
 
+struct wlr_locker_state {
+	struct wl_list link; // sway_lock_state::lockers
+	struct wl_resource *resource; // zwp_screenlocker_v1
+};
+
 static void handle_locker_lock(struct wl_client *client, struct wl_resource *resource, uint32_t id);
+
+static void locker_resource_destroy(struct wl_resource *resource) {
+	struct wlr_locker_state* state = wl_resource_get_user_data(resource);
+	wl_list_remove(&state->link);
+	free(state);
+}
 
 static void handle_lock_unlock(struct wl_client *client,
 		struct wl_resource *resource) {
@@ -31,7 +42,10 @@ static void handle_lock_unlock(struct wl_client *client,
 	server.lock_screen.fail_locked = false;
 	sway_log(SWAY_ERROR, "RECEIVED UNLOCK");
 
-	// TODO broadcast unlock event
+	struct wlr_locker_state *locker;
+	wl_list_for_each(locker, &server.lock_screen.locker_globals, link) {
+		zwp_screenlocker_v1_send_unlocked(locker->resource);
+	}
 
 	struct sway_seat *seat;
 	wl_list_for_each(seat, &server.input->seats, link) {
@@ -87,14 +101,29 @@ static const struct zwp_screenlocker_lock_v1_interface lock_impl = {
 
 static void screenlock_bind(struct wl_client *client, void *data,
 		uint32_t version, uint32_t id) {
-	struct wl_resource *resource = wl_resource_create(client,
-		&zwp_screenlocker_v1_interface, version, id);
-	// TODO make a list of screenlock objects for dispatching locked/unlocked events
-	if (!resource) {
+	struct wlr_locker_state *state = calloc(1, sizeof(*state));
+	if (!state) {
 		wl_client_post_no_memory(client);
 		return;
 	}
-	wl_resource_set_implementation(resource, &unlock_impl, NULL, NULL);
+
+	state->resource = wl_resource_create(client,
+		&zwp_screenlocker_v1_interface, version, id);
+
+	if (!state->resource) {
+		free(state);
+		wl_client_post_no_memory(client);
+		return;
+	}
+	wl_resource_set_implementation(state->resource, &unlock_impl, state, locker_resource_destroy);
+	wl_list_insert(&server.lock_screen.locker_globals, &state->link);
+
+	if (server.lock_screen.client) {
+		zwp_screenlocker_v1_send_locked(state->resource);
+		if (server.lock_screen.client == PERMALOCK_CLIENT) {
+			zwp_screenlocker_v1_send_lock_abandoned(state->resource);
+		}
+	}
 }
 
 
@@ -110,7 +139,12 @@ static void lock_resource_destroy(struct wl_resource *resource) {
 	if (server.lock_screen.fail_locked) {
 		sway_log(SWAY_ERROR, "THE LOCKSCREEN CLIENT DIED, PERMALOCKING");
 		server.lock_screen.client = PERMALOCK_CLIENT;
-		// TODO broadcast lock_abandoned event
+
+		struct wlr_locker_state *locker;
+		wl_list_for_each(locker, &server.lock_screen.locker_globals, link) {
+			zwp_screenlocker_v1_send_lock_abandoned(locker->resource);
+		}
+
 		struct sway_seat *seat;
 		wl_list_for_each(seat, &server.input->seats, link) {
 			seat_set_exclusive_client(seat, PERMALOCK_CLIENT);
@@ -130,6 +164,7 @@ static void lock_resource_destroy(struct wl_resource *resource) {
 
 void sway_lock_state_create(struct sway_lock_state *state,
 		struct wl_display *display) {
+	wl_list_init(&state->locker_globals);
 	state->ext_unlocker_v1_global =
 		wl_global_create(display, &zwp_screenlocker_v1_interface,
 			1, NULL, screenlock_bind);
@@ -204,10 +239,15 @@ static void handle_locker_lock(struct wl_client *client, struct wl_resource *loc
 		return;
 	}
 
+	if (!server.lock_screen.client) {
+		// no re-broadcast when recovering from a permalock
+		struct wlr_locker_state *locker;
+		wl_list_for_each(locker, &server.lock_screen.locker_globals, link) {
+			zwp_screenlocker_v1_send_locked(locker->resource);
+		}
+	}
+
 	server.lock_screen.client = client;
-	// TODO broadcast lock event
-	// TODO delay this send until next frame
-	zwp_screenlocker_lock_v1_send_locked(lock_resource);
 
 	// only lock screen gets input; this applies immediately,
 	// before the lock screen program is set up
@@ -215,6 +255,9 @@ static void handle_locker_lock(struct wl_client *client, struct wl_resource *loc
 	wl_list_for_each(seat, &server.input->seats, link) {
 		seat_set_exclusive_client(seat,  server.lock_screen.client);
 	}
+
+	// TODO delay this send until next frame?
+	zwp_screenlocker_lock_v1_send_locked(lock_resource);
 
 	sway_log(SWAY_ERROR, "LOCKSCREEN STARTED");
 }

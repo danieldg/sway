@@ -14,6 +14,8 @@ struct sway_lock_state {
 
 	struct wlr_texture *permalock_message;
 	struct wl_global *ext_unlocker_v1_global;
+
+	struct wl_list locker_globals;
 };
 
 // todo: need destroy
