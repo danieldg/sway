@@ -1,12 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <protocol name="zwp_screenlocker_v1">
+  <copyright>
+    Copyright © 2021 Daniel De Graaf
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
   <interface name="zwp_screenlocker_v1" version="1">
     <description summary="Screen locking manager">
-      This interface provides notification of screen lock/unlock events and
-      (if supported) acting as a screenlocker.
-
-      This is a privileged protocol; clients do not need access to this
-      protocol if they only want to display windows on the locked desktop.
+      This interface provides notification of screen lock/unlock events,
+      displaying windows on a locked screen, and acting as a screenlocker.
     </description>
 
     <request name="destroy" type="destructor">
@@ -15,26 +35,35 @@
 
     <event name="locked">
       <description summary="Triggered when the screen is locked">
-        This event will be sent on creation if the screen is currently locked.
+        This event will be sent on creation if the screen is currently locked,
+        and at the start of any lock action.
 
-        Windows on the unlocked desktop may still be visible due to a locking
-        animation. Frame callbacks should be used to identify when specific
-        surfaces are no longer visible.
+        Note: windows on the unlocked desktop may still be visible (due to a
+        locking animation) even after this event is sent.
       </description>
     </event>
 
     <event name="unlocked">
       <description summary="Triggered when the screen is unlocked">
-        Windows on the locked desktop may still be visible due to a locking
-        animation. Frame callbacks should be used to identify when specific
-        surfaces are no longer visible.
+        This event will be sent on creation if the screen is currently unlocked,
+        and at the end of any unlock action.
+
+        Note: windows on the unlocked desktop may become visible (due to an
+        unlocking animation) prior to this event being sent
       </description>
     </event>
 
     <event name="lock_abandoned">
       <description summary="Triggered when a locker dies without unlocking">
+        This event will be sent on creation (in addition to a locked event) if
+        the screen is currently locked with no client holding an active lock
+        handle.
+
         A new screen-locker should be started as soon as possible in order to
         allow the user to unlock the session.
+
+        If a compositor does not support external lockers, this event will never
+        be sent.
       </description>
     </event>
 
@@ -49,12 +78,31 @@
       </description>
       <arg name="id" type="new_id" interface="zwp_screenlocker_lock_v1"/>
     </request>
+
+    <request name="get_visibility">
+      <description summary="set the visibility of a surface on the lockscreen">
+        By default, no surfaces are visible on the locked desktop. Any surface
+        that should be visible on the locked desktop must set its visibility
+        using this visibility object.
+
+        This request is required for any toplevel surface displayed on the
+        locked desktop to ensure that sensitive information is not present on
+        the surface. The exact definition of sensitive may be defined by other
+        configuration, but might include notification details, keyboard
+        autocompletion, or configuration interfaces.
+      </description>
+      <arg name="id" type="new_id" interface="zwp_screenlocker_visibility_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
   </interface>
 
   <interface name="zwp_screenlocker_lock_v1" version="1">
     <event name="rejected">
       <description summary="The compositor has rejected the request">
         This object is inert and should be destroyed.  
+
+        If a compositor does not support external lockers, this event will always
+        be sent on the creation of a lock object.
 
         TODO: should the reason be an enum?  Possible values: permission_denied, locker_exists.
       </description>
@@ -113,5 +161,34 @@
         an immediate unlock depending on if the lock is persistent.
       </description>
     </request>
+  </interface>
+
+  <interface name="zwp_screenlocker_visibility_v1" version="1">
+    <request name="destroy" type="destructor">
+      <description summary="destroy this object">
+        Destroying this object will revert the surface to not be visible on the
+        lockscreen at the next commit.
+      </description>
+    </request>
+
+    <enum name="visibility">
+      <entry name="default" value="0" summary="Only visible when unlocked"/>
+      <entry name="lock_only" value="1" summary="Only visible when locked"/>
+      <entry name="both" value="2" summary="Visible regardless of lock state"/>
+    </enum>
+
+    <request name="set_visibility">
+      <description summary="set this surface visible on the lockscreen">
+        This value is double-buffered, see wl_surface.commit.
+      </description>
+      <arg name="visibility" type="uint" enum="zwp_screenlocker_visibility_v1.visibility"/>
+    </request>
+
+    <event name="failed">
+      <description summary="the locked desktop cannot show this window">
+        This event is sent immediately if the associated window cannot be shown
+        on a locked desktop. This object is inert and should be destroyed.
+      </description>
+    </event>
   </interface>
 </protocol>

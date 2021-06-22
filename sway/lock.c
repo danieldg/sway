@@ -23,6 +23,8 @@ struct wlr_locker_state {
 
 static void handle_locker_lock(struct wl_client *client, struct wl_resource *resource, uint32_t id);
 
+static void handle_get_visibility(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface);
+
 static void locker_resource_destroy(struct wl_resource *resource) {
 	struct wlr_locker_state* state = wl_resource_get_user_data(resource);
 	wl_list_remove(&state->link);
@@ -82,14 +84,24 @@ static void handle_lock_temporary(struct wl_client *client, struct wl_resource *
 	server.lock_screen.fail_locked = false;
 }
 
+static void handle_set_visibility(struct wl_client *client, struct wl_resource *resource, uint32_t visibility)
+{
+	// TODO set the property
+}
+
+static void vis_resource_destroy(struct wl_resource *resource) {
+	// TODO set back to unlock-only
+}
+
 static void resource_destroy(struct wl_client *client, struct wl_resource *resource)
 {
         wl_resource_destroy(resource);
 }
 
 static const struct zwp_screenlocker_v1_interface unlock_impl = {
-	.lock = handle_locker_lock,
 	.destroy = resource_destroy,
+	.get_visibility = handle_get_visibility,
+	.lock = handle_locker_lock,
 };
 
 static const struct zwp_screenlocker_lock_v1_interface lock_impl = {
@@ -97,6 +109,11 @@ static const struct zwp_screenlocker_lock_v1_interface lock_impl = {
 	.set_persistent = handle_lock_persist,
 	.set_temporary = handle_lock_temporary,
 	.destroy = resource_destroy,
+};
+
+static const struct zwp_screenlocker_visibility_v1_interface visibility_impl = {
+	.destroy = resource_destroy,
+	.set_visibility = handle_set_visibility,
 };
 
 static void screenlock_bind(struct wl_client *client, void *data,
@@ -123,6 +140,8 @@ static void screenlock_bind(struct wl_client *client, void *data,
 		if (server.lock_screen.client == PERMALOCK_CLIENT) {
 			zwp_screenlocker_v1_send_lock_abandoned(state->resource);
 		}
+	} else {
+		zwp_screenlocker_v1_send_unlocked(state->resource);
 	}
 }
 
@@ -260,4 +279,21 @@ static void handle_locker_lock(struct wl_client *client, struct wl_resource *loc
 	zwp_screenlocker_lock_v1_send_locked(lock_resource);
 
 	sway_log(SWAY_ERROR, "LOCKSCREEN STARTED");
+}
+
+static void handle_get_visibility(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface)
+{
+	struct wl_resource *vis_resource = wl_resource_create(client,
+		&zwp_screenlocker_visibility_v1_interface, 1, id);
+	if (vis_resource == NULL) {
+		wl_client_post_no_memory(client);
+		return;
+	}
+
+	// TODO reject non-layer-shell surfaces
+	// TODO hook to surface resource so we get made inert if it is destroyed
+
+	wl_resource_set_implementation(vis_resource,
+		&visibility_impl, NULL,
+		vis_resource_destroy);
 }
