@@ -6,7 +6,7 @@
 #define PERMALOCK_CLIENT (struct wl_client *)(-1)
 
 struct sway_lock_state {
-	// true -> if lock screen crashes, unrecoverable
+	// true if lock screen crashed
 	bool fail_locked;
 	// if this is not NULL, screen is locked. If the lock screen crashed,
 	// this may be set to PERMALOCK_CLIENT .
@@ -16,6 +16,15 @@ struct sway_lock_state {
 	struct wl_global *ext_unlocker_v1_global;
 
 	struct wl_list locker_globals;
+	struct wl_list lock_surfaces;
+};
+
+struct lock_surface {
+	struct wl_resource *resource;
+	struct wlr_surface *surface;
+	struct wl_list link; // sway_lock_state::lock_surfaces
+	struct wl_listener surface_destroy;
+	uint32_t mode; // enum zwp_screenlocker_visibility_v1.visibility
 };
 
 // todo: need destroy

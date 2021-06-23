@@ -17,7 +17,7 @@
 #include "util.h"
 
 struct wlr_locker_state {
-	struct wl_list link; // sway_lock_state::lockers
+	struct wl_list link; // sway_lock_state::locker_globals
 	struct wl_resource *resource; // zwp_screenlocker_v1
 };
 
@@ -86,11 +86,30 @@ static void handle_lock_temporary(struct wl_client *client, struct wl_resource *
 
 static void handle_set_visibility(struct wl_client *client, struct wl_resource *resource, uint32_t visibility)
 {
-	// TODO set the property
+	struct lock_surface* state = wl_resource_get_user_data(resource);
+	if (!state)
+		return;
+	state->mode = visibility;
+	// TODO double-buffer this instead of eager-applying
+	// TODO force redraw of this surface
 }
 
 static void vis_resource_destroy(struct wl_resource *resource) {
-	// TODO set back to unlock-only
+	struct lock_surface* state = wl_resource_get_user_data(resource);
+	if (!state)
+		return;
+	wl_list_remove(&state->surface_destroy.link);
+	wl_list_remove(&state->link);
+	wl_resource_set_user_data(state->resource, NULL);
+	free(state);
+}
+
+static void vis_surface_destroy(struct wl_listener *listener, void *data) {
+	struct lock_surface *state = wl_container_of(listener, state, surface_destroy);
+	wl_list_remove(&state->surface_destroy.link);
+	wl_list_remove(&state->link);
+	wl_resource_set_user_data(state->resource, NULL);
+	free(state);
 }
 
 static void resource_destroy(struct wl_client *client, struct wl_resource *resource)
@@ -184,6 +203,7 @@ static void lock_resource_destroy(struct wl_resource *resource) {
 void sway_lock_state_create(struct sway_lock_state *state,
 		struct wl_display *display) {
 	wl_list_init(&state->locker_globals);
+	wl_list_init(&state->lock_surfaces);
 	state->ext_unlocker_v1_global =
 		wl_global_create(display, &zwp_screenlocker_v1_interface,
 			1, NULL, screenlock_bind);
@@ -272,7 +292,7 @@ static void handle_locker_lock(struct wl_client *client, struct wl_resource *loc
 	// before the lock screen program is set up
 	struct sway_seat *seat;
 	wl_list_for_each(seat, &server.input->seats, link) {
-		seat_set_exclusive_client(seat,  server.lock_screen.client);
+		seat_set_exclusive_client(seat, client);
 	}
 
 	// TODO delay this send until next frame?
@@ -281,19 +301,33 @@ static void handle_locker_lock(struct wl_client *client, struct wl_resource *loc
 	sway_log(SWAY_ERROR, "LOCKSCREEN STARTED");
 }
 
-static void handle_get_visibility(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface)
+static void handle_get_visibility(struct wl_client *client, struct wl_resource *resource, uint32_t id, struct wl_resource *surface_resource)
 {
-	struct wl_resource *vis_resource = wl_resource_create(client,
-		&zwp_screenlocker_visibility_v1_interface, 1, id);
-	if (vis_resource == NULL) {
+	struct wlr_surface *surface = wlr_surface_from_resource(surface_resource);
+
+	struct lock_surface *state = calloc(1, sizeof(*state));
+	if (state == NULL) {
 		wl_client_post_no_memory(client);
 		return;
 	}
 
-	// TODO reject non-layer-shell surfaces
-	// TODO hook to surface resource so we get made inert if it is destroyed
+	state->resource = wl_resource_create(client,
+		&zwp_screenlocker_visibility_v1_interface, 1, id);
+	if (state->resource == NULL) {
+		free(state);
+		wl_client_post_no_memory(client);
+		return;
+	}
 
-	wl_resource_set_implementation(vis_resource,
-		&visibility_impl, NULL,
+	state->surface = surface;
+	state->mode = 0;
+	wl_signal_add(&surface->events.destroy, &state->surface_destroy);
+	state->surface_destroy.notify = vis_surface_destroy;
+	wl_list_insert(&server.lock_screen.lock_surfaces, &state->link);
+
+	// TODO reject non-layer-shell surfaces?
+
+	wl_resource_set_implementation(state->resource,
+		&visibility_impl, state,
 		vis_resource_destroy);
 }

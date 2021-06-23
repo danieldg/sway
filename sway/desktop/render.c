@@ -145,9 +145,17 @@ static void render_surface_iterator(struct sway_output *output,
 		return;
 	}
 
-	struct wl_client* client = wl_resource_get_client(surface->resource);
-	if (server.lock_screen.client && server.lock_screen.client != client) {
+	if (server.lock_screen.client) {
+		struct lock_surface *lock_surf;
+		wl_list_for_each(lock_surf, &server.lock_screen.lock_surfaces, link) {
+			if (surface == lock_surf->surface) {
+				goto found;
+			}
+		}
 		return;
+ found:
+		if (!lock_surf->mode)
+			return;
 	}
 
 	struct wlr_fbox src_box;
@@ -1090,10 +1098,8 @@ void output_render(struct sway_output *output, struct timespec *when,
 
 				wlr_render_texture(renderer, output->permalock_message, matrix, x, y, 1.0);
 			}
+			goto render_overlay;
 		}
-
-		// then go to clear lock screen
-		goto render_overlay;
 	}
 	if (output_has_opaque_overlay_layer_surface(output)) {
 		goto render_overlay;
@@ -1146,11 +1152,13 @@ void output_render(struct sway_output *output, struct timespec *when,
 		render_layer_toplevel(output, damage,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
 
-		render_workspace(output, damage, workspace, workspace->current.focused);
-		render_floating(output, damage);
+		if (!server.lock_screen.client) {
+			render_workspace(output, damage, workspace, workspace->current.focused);
+			render_floating(output, damage);
 #if HAVE_XWAYLAND
-		render_unmanaged(output, damage, &root->xwayland_unmanaged);
+			render_unmanaged(output, damage, &root->xwayland_unmanaged);
 #endif
+		}
 		render_layer_toplevel(output, damage,
 			&output->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
 
