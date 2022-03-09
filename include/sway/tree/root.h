@@ -49,6 +49,7 @@ struct sway_root {
 #endif
 		struct wlr_scene_node *shell_overlay;
 		struct wlr_scene_node *seat;
+		struct wlr_scene_node *lockscreen;
 	} layers;
 
 	// Includes disabled outputs

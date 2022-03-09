@@ -10,6 +10,7 @@
 #include "sway/desktop/transaction.h"
 #include "sway/input/cursor.h"
 #include "sway/input/input-manager.h"
+#include "sway/lock.h"
 #include "sway/output.h"
 #include "sway/tree/container.h"
 #include "sway/tree/node.h"
@@ -611,14 +612,17 @@ static void arrange_popup(struct wlr_scene_node *popup) {
 
 static void arrange_root(struct sway_root *root) {
 	struct sway_container *fs = root->fullscreen_global;
+	bool locked = server.session_lock.locked;
+	bool enable = !fs && !locked;
 
-	wlr_scene_node_set_enabled(root->layers.shell_background, !fs);
-	wlr_scene_node_set_enabled(root->layers.shell_bottom, !fs);
-	wlr_scene_node_set_enabled(root->layers.tiling, !fs);
-	wlr_scene_node_set_enabled(root->layers.floating, !fs);
-	wlr_scene_node_set_enabled(root->layers.shell_top, !fs);
-	wlr_scene_node_set_enabled(root->layers.fullscreen, !fs);
-	wlr_scene_node_set_enabled(root->layers.shell_overlay, !fs);
+	wlr_scene_node_set_enabled(root->layers.shell_background, enable);
+	wlr_scene_node_set_enabled(root->layers.shell_bottom, enable);
+	wlr_scene_node_set_enabled(root->layers.tiling, enable);
+	wlr_scene_node_set_enabled(root->layers.floating, enable);
+	wlr_scene_node_set_enabled(root->layers.shell_top, enable);
+	wlr_scene_node_set_enabled(root->layers.fullscreen, enable);
+	wlr_scene_node_set_enabled(root->layers.shell_overlay, enable);
+	wlr_scene_node_set_enabled(root->layers.lockscreen, locked);
 
 	// hide all contents in the scratchpad
 	for (int i = 0; i < root->scratchpad->length; i++) {
@@ -627,7 +631,20 @@ static void arrange_root(struct sway_root *root) {
 		wlr_scene_node_set_enabled(con->scene_node, false);
 	}
 
-	if (fs) {
+	if (locked) {
+		if (!server.session_lock.lock) {
+			return;
+		}
+		struct wlr_session_lock_surface_v1 *lock_surface;
+		wl_list_for_each(lock_surface, &server.session_lock.lock->surfaces, link) {
+			struct sway_session_lock_surface* surf = lock_surface->data;
+			struct sway_output *output = lock_surface->output->data;
+			if (output) {
+				wlr_scene_output_set_position(output->scene_output, output->lx, output->ly);
+				wlr_scene_node_set_position(surf->scene, output->lx, output->ly);
+			}
+		}
+	} else if (fs) {
 		for (int i = 0; i < root->outputs->length; i++) {
 			struct sway_output *output = root->outputs->items[i];
 			struct sway_workspace *ws = output->current.active_workspace;
