@@ -16,6 +16,7 @@
 #include "sway/input/libinput.h"
 #include "sway/input/seat.h"
 #include "sway/ipc-server.h"
+#include "sway/lock.h"
 #include "sway/server.h"
 #include "sway/tree/view.h"
 #include "stringop.h"
@@ -286,9 +287,14 @@ static void handle_inhibit_activate(struct wl_listener *listener, void *data) {
 }
 
 static void handle_inhibit_deactivate(struct wl_listener *listener, void *data) {
+	struct sway_session_lock_manager *lock_state = server.session_lock->data;
 	struct sway_input_manager *input_manager = wl_container_of(
 			listener, input_manager, inhibit_deactivate);
 	struct sway_seat *seat;
+	if (lock_state->locked) {
+		// Don't deactivate the grab of a screenlocker
+		return;
+	}
 	wl_list_for_each(seat, &input_manager->seats, link) {
 		seat_set_exclusive_client(seat, NULL);
 		struct sway_node *previous = seat_get_focus(seat);

@@ -20,6 +20,7 @@
 #include "sway/input/input-manager.h"
 #include "sway/input/seat.h"
 #include "sway/layers.h"
+#include "sway/lock.h"
 #include "sway/output.h"
 #include "sway/server.h"
 #include "sway/tree/arrange.h"
@@ -1028,6 +1029,7 @@ void output_render(struct sway_output *output, struct timespec *when,
 		pixman_region32_t *damage) {
 	struct wlr_output *wlr_output = output->wlr_output;
 	struct wlr_renderer *renderer = output->server->renderer;
+	struct sway_session_lock_manager *lock_state = server.session_lock->data;
 
 	struct sway_workspace *workspace = output->current.active_workspace;
 	if (workspace == NULL) {
@@ -1054,6 +1056,39 @@ void output_render(struct sway_output *output, struct timespec *when,
 
 	if (debug.damage == DAMAGE_HIGHLIGHT) {
 		wlr_renderer_clear(renderer, (float[]){1, 1, 0, 1});
+	}
+
+	if (lock_state->locked) {
+		float clear_color[] = {0.0f, 0.0f, 0.0f, 1.0f};
+		if (lock_state->lock == NULL) {
+			// abandoned lock -> red BG
+			clear_color[0] = 1.f;
+		}
+		int nrects;
+		pixman_box32_t *rects = pixman_region32_rectangles(damage, &nrects);
+		for (int i = 0; i < nrects; ++i) {
+			scissor_output(wlr_output, &rects[i]);
+			wlr_renderer_clear(renderer, clear_color);
+		}
+
+		if (lock_state->lock != NULL) {
+			struct render_data data = {
+				.damage = damage,
+				.alpha = 1.0f,
+			};
+
+			struct wlr_session_lock_surface_v1 *lock_surface;
+			wl_list_for_each(lock_surface, &lock_state->lock->surfaces, link) {
+				if (lock_surface->output != wlr_output)
+					continue;
+				if (!lock_surface->mapped)
+					continue;
+
+				output_surface_for_each_surface(output, lock_surface->surface,
+					0.0, 0.0, render_surface_iterator, &data);
+			}
+		}
+		goto renderer_end;
 	}
 
 	if (output_has_opaque_overlay_layer_surface(output)) {
