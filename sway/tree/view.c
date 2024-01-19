@@ -195,6 +195,13 @@ const char *view_get_shell(struct sway_view *view) {
 	return "unknown";
 }
 
+struct wl_client *view_get_client(struct sway_view *view) {
+	if (view->type == SWAY_VIEW_XDG_SHELL) {
+		return wl_resource_get_client(view->surface->resource);
+	}
+	return NULL;
+}
+
 void view_get_constraints(struct sway_view *view, double *min_width,
 		double *max_width, double *min_height, double *max_height) {
 	if (view->impl->get_constraints) {

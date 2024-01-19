@@ -6,6 +6,7 @@
 #include <wlr/config.h>
 #include <wlr/types/wlr_content_type_v1.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_security_context_v1.h>
 #include <xkbcommon/xkbcommon.h>
 #include "config.h"
 #include "log.h"
@@ -649,6 +650,24 @@ static void ipc_json_describe_view(struct sway_container *c, json_object *object
 	if (content_type != WP_CONTENT_TYPE_V1_TYPE_NONE) {
 		json_object_object_add(object, "content_type",
 			json_object_new_string(ipc_json_content_type_description(content_type)));
+	}
+
+	struct wl_client *client = view_get_client(c->view);
+	const struct wlr_security_context_v1_state *security_context = NULL;
+	if (client) {
+		security_context = wlr_security_context_manager_v1_lookup_client(
+				server.security_context_manager_v1, client);
+	}
+	if (security_context) {
+		json_object *secctx = json_object_new_object();
+		if (security_context->sandbox_engine)
+			json_object_object_add(secctx, "sandbox_engine", json_object_new_string(security_context->sandbox_engine));
+		if (security_context->app_id)
+			json_object_object_add(secctx, "app_id", json_object_new_string(security_context->app_id));
+		if (security_context->instance_id)
+			json_object_object_add(secctx, "instance_id", json_object_new_string(security_context->instance_id));
+
+		json_object_object_add(object, "security_context", secctx);
 	}
 
 #if WLR_HAS_XWAYLAND
