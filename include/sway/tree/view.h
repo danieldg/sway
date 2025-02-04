@@ -229,6 +229,8 @@ const char *view_get_sandbox_instance_id(struct sway_view *view);
 
 const char *view_get_shell(struct sway_view *view);
 
+struct wl_client *view_get_client(struct sway_view *view);
+
 void view_get_constraints(struct sway_view *view, double *min_width,
 		double *max_width, double *min_height, double *max_height);
 
@@ -327,7 +329,7 @@ void view_update_title(struct sway_view *view, bool force);
  * Run any criteria that match the view and haven't been run on this view
  * before.
  */
-void view_execute_criteria(struct sway_view *view);
+void view_execute_criteria(struct sway_view *view, const char* trigger);
 
 /**
  * Returns true if there's a possibility the view may be rendered on screen.
